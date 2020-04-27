@@ -5,23 +5,22 @@ import nanogramm1 as ng
 root = tk.Tk()
 
 # Assemble UI
-myHeader = tk.Label(root, text = "TKinter Version " + str(tk.TkVersion))
-myPuzzle= tk.Canvas(root, height = 800, width = 800, background = 'black')
+myHeader = tk.Label(root, text="TKinter Version " + str(tk.TkVersion))
+myPuzzle = tk.Canvas(root, height=800, width=800, background='black')
 
 # Positioning widgets
 myHeader.grid(row=0, column=0)
 myPuzzle.grid(row=1, column=0)
 
 # Puzzle settings
-row_number_spacer = ''
 square_size = 16
-font_size = -14                        # negative number means pixels is used as unit
+font_size = -14  # negative number means pixels is used as unit
+spacer_width = 2  # space between two numbers in a row
 line_width, line_width_bold = 1, 2
 
 # Populate canvas widget
-myPuzzleFont = font.Font(family = 'Arial', size = font_size, weight = 'bold')
-myPuzzleFontNarrow = font.Font(family = 'Arial Narrow', size = font_size, weight = 'bold')
-spacer_width = myPuzzleFont.measure(row_number_spacer)
+myPuzzleFont = font.Font(family='Arial', size=font_size, weight='bold')
+myPuzzleFontNarrow = font.Font(family='Arial Narrow', size=font_size, weight='bold')
 number_width = myPuzzleFontNarrow.measure('00')
 number_height = myPuzzleFont.metrics('linespace')
 
@@ -29,8 +28,8 @@ number_height = myPuzzleFont.metrics('linespace')
 def getTextItemCords(item_id):
     """ returns a list with x0, y0, x1, y1 coordinates for a canvas text item """
     x0, y0 = myPuzzle.coords(item_id)
-    x1 = x0 + myPuzzleFont.measure(myPuzzle.itemcget(item_id, 'text'))        # x1 depends on the with of the given text
-    y1 = y0 + myPuzzleFont.metrics('linespace')         # linespace gives the height for any given font
+    x1 = x0 + myPuzzleFont.measure(myPuzzle.itemcget(item_id, 'text'))  # x1 depends on the with of the given text
+    y1 = y0 + myPuzzleFont.metrics('linespace')  # linespace gives the height for any given font
     return [x0, y0, x1, y1]
 
 
@@ -40,7 +39,7 @@ def calcTitleRowWith(rows):
     # TODO make puzzle adjust dynamically to one or more digit puzzles
 
     biggest_tuple, biggest_tuple_id = 0, 0
-    for row_id in range(len(rows)):        # iterate through all the row tuples, find the row with the most numbers
+    for row_id in range(len(rows)):  # iterate through all the row tuples, find the row with the most numbers
         if len(rows[row_id]) > biggest_tuple: biggest_tuple, biggest_tuple_id = len(rows[row_id]), row_id
 
     # calculate and return width of one the biggest tuple found
@@ -72,7 +71,7 @@ def drawGrid(ng_cols, ng_rows):
     # Create upper left box
     title_row_width = calcTitleRowWith(ng_rows)
     title_col_width = calcTitleColWith(ng_cols)
-    myPuzzle.create_rectangle(0, 0, title_row_width, title_col_width, fill = 'white')
+    myPuzzle.create_rectangle(0, 0, title_row_width, title_col_width, fill='white')
 
     # calculate offset for the squares grid
     x_offset, y_offset = title_row_width + line_width_bold, title_col_width + line_width_bold
@@ -85,40 +84,51 @@ def drawGrid(ng_cols, ng_rows):
         # rectangles
         x_coord = calcSquarePosition(col + 1)
         myPuzzle.create_rectangle(x_offset + x_coord, 0, x_offset + x_coord + square_size, title_col_width,
-                                fill = 'white', width = 0)
+                                  fill='white', width=0)
         # column number
-        inv_col = ng_cols[col][::-1]        # inverse tuple
+        inv_col = ng_cols[col][::-1]  # inverse tuple
         for number in range(len(ng_cols[col])):
             # calculate y axis offset for ever single number
             y_offset_number = title_col_width - number * number_height
-            if inv_col[number] < 10:
-                myPuzzle.create_text(x_offset + x_coord + square_size / 2, y_offset_number, text = inv_col[number],
-                                     font = myPuzzleFont, anchor = tk.S)
-            else:
-                myPuzzle.create_text(x_offset + x_coord + square_size / 2 - 1, y_offset_number, text=inv_col[number],
-                                     font=myPuzzleFontNarrow, anchor=tk.S)
 
+            if inv_col[number] < 10:             # account for narrow font & offset
+                my_font, num_off = myPuzzleFont, 0
+            else:
+                my_font, num_off = myPuzzleFontNarrow, 1
+
+            # create text items for column numbers
+            myPuzzle.create_text(x_offset + x_coord + square_size / 2 - num_off, y_offset_number, text=inv_col[number],
+                                 font=my_font, anchor=tk.S,
+                                 tags=('colNumber', 'COL.' + str(col) + '.' + str(len(inv_col) - number -1)))
+
+
+
+    # bind event handler to left click events of all
+    myPuzzle.tag_bind('colNumber', '<Button-1>', handleRowNumberClick)
+
+    # same goes for the rows
     for row in range(num_rows):
         # rectangles
         y_coord = calcSquarePosition(row + 1)
         myPuzzle.create_rectangle(0, y_offset + y_coord, title_row_width, y_offset + y_coord + square_size,
-                                fill = 'white', width = 0)
+                                  fill='white', width=0)
         # row numbers
-        inv_row = ng_rows[row][::-1]        # inverse tuple, has to be done... weired...
-        for number in range(len(ng_rows[row])):         # iterate through the numbers of tuple 'row'
+        inv_row = ng_rows[row][::-1]  # inverse tuple, has to be done... weired...
+        for number in range(len(ng_rows[row])):  # iterate through the numbers of tuple 'row'
             # calculate x axis offset for every single number
             x_offset_number = title_row_width - number * (number_width + spacer_width) - number_width / 2
-            # account for narrow font
-            if inv_row[number] < 10:
-                myPuzzle.create_text(x_offset_number, y_offset + y_coord, text = inv_row[number],
-                                     font = myPuzzleFont, anchor = tk.N)
-            else:
-                myPuzzle.create_text(x_offset_number - 1, y_offset + y_coord - 1, text = inv_row[number],
-                                     font = myPuzzleFontNarrow, anchor = tk.N)
 
+            if inv_row[number] < 10:              # account for narrow font & offset
+                my_font, num_off = myPuzzleFont, 0
+            else:
+                my_font, num_off = myPuzzleFontNarrow, 1
+
+            # create text items for row numbers
+            myPuzzle.create_text(x_offset_number - num_off, y_offset + y_coord - num_off, text=inv_row[number],
+                                 font=my_font, anchor=tk.N)
 
     # Create the squares
-    for col in range(num_cols):         # Iterate through all rows, then columns
+    for col in range(num_cols):  # Iterate through all rows, then columns
         # calculate the relative position for this column
         x_coord = calcSquarePosition(col + 1)
         for row in range(num_rows):
@@ -126,16 +136,25 @@ def drawGrid(ng_cols, ng_rows):
             y_coord = calcSquarePosition(row + 1)
             # draw a square at that position, including offsets
             myPuzzle.create_rectangle(x_coord + x_offset, y_coord + y_offset,
-                                    x_coord + square_size + x_offset, y_coord + square_size + y_offset,
-                                    fill = 'white', width = 0)
+                                      x_coord + square_size + x_offset, y_coord + square_size + y_offset,
+                                      fill='white', width=0)
 
     # Resize Canvas to final size
     canvas_x_pos = calcSquarePosition(len(ng_cols)) + x_offset + square_size
     canvas_y_pos = calcSquarePosition(len(ng_rows)) + y_offset + square_size
-    myPuzzle.configure(height = canvas_y_pos, width = canvas_x_pos)
+    myPuzzle.configure(height=canvas_y_pos, width=canvas_x_pos)
 
+
+def handleRowNumberClick(event):
+    text_item_id = event.widget.find_withtag('current')[0]
+    print(myPuzzle.itemcget(text_item_id, 'tags'))
 
 
 drawGrid(ng.cols, ng.rows)
+
+# TODO cross out numbers
+# TODO mouse click handling on squares
+# TODO dragging the mouse to mark blocks
+# TODO print puzzle as postscript
 
 root.mainloop()
