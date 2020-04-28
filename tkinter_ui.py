@@ -13,24 +13,23 @@ myHeader.grid(row=0, column=0)
 myPuzzle.grid(row=1, column=0)
 
 # Puzzle settings
+ng_cols = ng.cols       # columns and rows of the nonogramm
+ng_rows = ng.rows
 square_size = 16
 font_size = -14  # negative number means pixels is used as unit
 spacer_width = 2  # space between two numbers in a row
-line_width, line_width_bold = 1, 2
+line_width = 1
+line_width_bold = 2
+title_row_width = 0     # will be set during puzzle UI assembly
+title_col_width = 0     # will be set during puzzle UI assembly
 
 # Populate canvas widget
 myPuzzleFont = font.Font(family='Arial', size=font_size, weight='bold')
 myPuzzleFontNarrow = font.Font(family='Arial Narrow', size=font_size, weight='bold')
+
+# measure font height and width
 number_width = myPuzzleFontNarrow.measure('00')
 number_height = myPuzzleFont.metrics('linespace')
-
-
-def getTextItemCords(item_id):
-    """ returns a list with x0, y0, x1, y1 coordinates for a canvas text item """
-    x0, y0 = myPuzzle.coords(item_id)
-    x1 = x0 + myPuzzleFont.measure(myPuzzle.itemcget(item_id, 'text'))  # x1 depends on the with of the given text
-    y1 = y0 + myPuzzleFont.metrics('linespace')  # linespace gives the height for any given font
-    return [x0, y0, x1, y1]
 
 
 def calcTitleRowWith(rows):
@@ -56,27 +55,29 @@ def calcTitleColWith(cols):
 
 
 def calcSquarePosition(col_or_row):
-    """ Calculates the relative position of a square
+    """ Calculates the relative position of a square to the offset point
         col_or_row = number of column or row for which the coordinates should be calculated
         Returns a float variable: x_rel_pos or y_rel_pos """
     return (col_or_row - 1) * (square_size + line_width) + int((col_or_row - 1) / 5) * (line_width_bold - line_width)
 
 
-def drawGrid(ng_cols, ng_rows):
+def drawGrid():
     """ Draws a nanogramm grid on the canvas """
 
     # count columns and rows
+    global num_cols, num_rows
     num_cols, num_rows = len(ng_cols), len(ng_rows)
 
-    # Create upper left box
+    # measure title row and column width
+    global title_col_width, title_row_width
     title_row_width = calcTitleRowWith(ng_rows)
     title_col_width = calcTitleColWith(ng_cols)
+
+    # Create upper left box
     myPuzzle.create_rectangle(0, 0, title_row_width, title_col_width, fill='white')
 
     # calculate offset for the squares grid
     x_offset, y_offset = title_row_width + line_width_bold, title_col_width + line_width_bold
-
-    # TODO optimize grid calculations. Calculate then once, save and reuse em..
 
     # Draw title rows and columns
     # create rectangles as background, then put the numbers on top of them
@@ -101,10 +102,8 @@ def drawGrid(ng_cols, ng_rows):
                                  font=my_font, anchor=tk.S,
                                  tags=('colNumber', 'COL.' + str(col) + '.' + str(len(inv_col) - number -1)))
 
-
-
-    # bind event handler to left click events of all
-    myPuzzle.tag_bind('colNumber', '<Button-1>', handleRowNumberClick)
+    # bind event handler to left click events of all numbers in the title columns
+    myPuzzle.tag_bind('colNumber', '<Button-1>', handleColNumberClick)
 
     # same goes for the rows
     for row in range(num_rows):
@@ -125,7 +124,11 @@ def drawGrid(ng_cols, ng_rows):
 
             # create text items for row numbers
             myPuzzle.create_text(x_offset_number - num_off, y_offset + y_coord - num_off, text=inv_row[number],
-                                 font=my_font, anchor=tk.N)
+                                 font=my_font, anchor=tk.N,
+                                 tags=('rowNumber', 'ROW.' + str(row) + '.' + str(len(inv_row) - number -1)))
+
+    # bind event handler to left click events of all numbers in the title rows
+    myPuzzle.tag_bind('rowNumber', '<Button-1>', handRowNumberClick)
 
     # Create the squares
     for col in range(num_cols):  # Iterate through all rows, then columns
@@ -145,12 +148,77 @@ def drawGrid(ng_cols, ng_rows):
     myPuzzle.configure(height=canvas_y_pos, width=canvas_x_pos)
 
 
-def handleRowNumberClick(event):
+def handleColNumberClick(event):
+    """ handle right click on column number, cross out that number """
+
+    # collect information about the clicked text item
     text_item_id = event.widget.find_withtag('current')[0]
-    print(myPuzzle.itemcget(text_item_id, 'tags'))
+    tags = myPuzzle.itemcget(text_item_id, 'tags').split(' ')
+    col, text_id, coord_tag = 0, 0, ' '
+    for tag in tags:
+        if tag[0:4] == 'COL.':
+            coord_tag = tag             # used later to tag strike out line
+            coords = tag.split('.')
+            col, text_id = int(coords[1]), int(coords[2])
+            break
+
+    # check if there was already a strike out line. this can happen, if the user slightly misses the strike out line
+    # and clicks on the number again. The strike out line has the same coordinate tag as the number, but adds '.SOL'
+    # If found, delete the strike out line and exit
+    if len(myPuzzle.find_withtag(coord_tag + '.SOL')):
+        myPuzzle.delete(coord_tag + '.SOL')
+        return
+
+    # create line item to cross out number
+    x_offset = title_row_width + line_width_bold + calcSquarePosition(col + 1)
+    y_offset = title_col_width - (len(ng_cols[col]) - text_id) * number_height
+    strike_out_line = myPuzzle.create_line(x_offset, y_offset, x_offset + square_size, y_offset + square_size,
+                                           width=2, capstyle=tk.ROUND,
+                                           tags=('StrikeOutLine', coord_tag + '.SOL'))    # SOL = strike out line
+
+    # bind event handler to right click event on strike out line
+    myPuzzle.tag_bind(strike_out_line, '<Button-1>', handleStrikeOutLineClick)
 
 
-drawGrid(ng.cols, ng.rows)
+def handRowNumberClick(event):
+    """ handle right click on row number, cross out that number """
+
+    # collect information about the clicked text item
+    text_item_id = event.widget.find_withtag('current')[0]
+    tags = myPuzzle.itemcget(text_item_id, 'tags').split(' ')
+    row, text_id, coord_tag = 0, 0, ' '
+    for tag in tags:
+        if tag[0:4] == 'ROW.':
+            coord_tag = tag  # used later to tag strike out line
+            coords = tag.split('.')
+            row, text_id = int(coords[1]), int(coords[2])
+            break
+
+    # check if there was already a strike out line. this can happen, if the user slightly misses the strike out line
+    # and clicks on the number again. The strike out line has the same coordinate tag as the number, but adds '.SOL'
+    # If found, delete the strike out line and exit
+    if len(myPuzzle.find_withtag(coord_tag + '.SOL')):
+        myPuzzle.delete(coord_tag + '.SOL')
+        return
+
+    # create line item to cross out number
+    x_offset = title_row_width - (len(ng_rows[row]) - text_id) * (number_width + spacer_width)
+    y_offset = title_col_width + line_width_bold + calcSquarePosition(row + 1)
+    strike_out_line = myPuzzle.create_line(x_offset, y_offset, x_offset + square_size, y_offset + square_size,
+                                           width=2, capstyle=tk.ROUND,
+                                           tags=('StrikeOutLine', coord_tag + '.SOL'))  # SOL = strike out line
+
+    # bind event handler to right click event on strike out line
+    myPuzzle.tag_bind(strike_out_line, '<Button-1>', handleStrikeOutLineClick)
+
+
+def handleStrikeOutLineClick(event):
+    """ Handle right click on strike out line, delete that line item """
+    # get the item id of the line item that got clicked, then delete that strike out line
+    myPuzzle.delete(event.widget.find_withtag('current')[0])
+
+
+drawGrid()
 
 # TODO cross out numbers
 # TODO mouse click handling on squares
