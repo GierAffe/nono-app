@@ -20,8 +20,28 @@ font_size = -14  # negative number means pixels is used as unit
 spacer_width = 2  # space between two numbers in a row
 line_width = 1
 line_width_bold = 2
-title_row_width = 0     # will be set during puzzle UI assembly
-title_col_width = 0     # will be set during puzzle UI assembly
+rec_empty_color = '#ffffff'         # standard = white
+rec_fill_color = '#404040'          # standard = dark grey
+rec_dot_color = '#404040'           # standard = dark grey
+sel_color_fill = '#404040'          # colors used for selection, when a selection is made on the grid
+sel_color_dot = '#eeeeee'           # light gray
+sel_color_clear = '#eeeeee'         # light gray
+# sel_bd_width = 3                    # selection highlight width
+# sel_dash = (3, 1)                   # selection dash sequence
+
+# will get set during gridDraw function
+title_row_width = 0
+title_col_width = 0
+
+# playing field
+grid = None                 # two dimensional list of chars. E = empty, F = filled, D = dotted
+num_cols = 0                # number of columns
+num_rows = 0                # number of rows
+
+# Variables for grid selection and highlighting functionality, like when the user selects multiple squares at once
+# sel_coordinates = False     # grid square coordinates as tuple (x0, y0, x1, y1)
+sel_origin = 0              # column and row of the clicked grid square as tuple of strings
+sel_button = 0              # which button has been used for the selection, 0 if no selection is active
 
 # Populate canvas widget
 myPuzzleFont = font.Font(family='Arial', size=font_size, weight='bold')
@@ -67,6 +87,10 @@ def drawGrid():
     # count columns and rows
     global num_cols, num_rows
     num_cols, num_rows = len(ng_cols), len(ng_rows)
+
+    # create 'virtual' playing field
+    global grid
+    grid = [['E' for x in range(num_rows)] for y in range(num_cols)]    # first dimension = cols, second = rows
 
     # measure title row and column width
     global title_col_width, title_row_width
@@ -140,7 +164,12 @@ def drawGrid():
             # draw a square at that position, including offsets
             myPuzzle.create_rectangle(x_coord + x_offset, y_coord + y_offset,
                                       x_coord + square_size + x_offset, y_coord + square_size + y_offset,
-                                      fill='white', width=0)
+                                      fill=rec_empty_color, width=0,
+                                      tags=('gridSquare', 'GRID.' + str(col) + '.' + str(row)))     # 'GRID.x.y'
+
+    # bind event handler to all 'button down' and 'button up' events of all grid squares
+    myPuzzle.tag_bind('gridSquare', '<Button>', handleRecButtonDown)
+    myPuzzle.tag_bind('gridSquare', '<ButtonRelease>', handleRecButtonUp)
 
     # Resize Canvas to final size
     canvas_x_pos = calcSquarePosition(len(ng_cols)) + x_offset + square_size
@@ -148,33 +177,35 @@ def drawGrid():
     myPuzzle.configure(height=canvas_y_pos, width=canvas_x_pos)
 
 
+def getTagCoordinates(tags_string, key):
+    """ Returns the Coordinate-Tag (key.x.y.z...)  as a whole [0] and split by '.' [1-x] as list.
+        key needs to be in the format 'KEY.' """
+    tags = tags_string.split(' ')
+    for tag in tags:
+        if tag[0:len(key)] == key:
+            return [tag] + tag.split('.')
+
+
 def handleColNumberClick(event):
     """ handle right click on column number, cross out that number """
 
     # collect information about the clicked text item
     text_item_id = event.widget.find_withtag('current')[0]
-    tags = myPuzzle.itemcget(text_item_id, 'tags').split(' ')
-    col, text_id, coord_tag = 0, 0, ' '
-    for tag in tags:
-        if tag[0:4] == 'COL.':
-            coord_tag = tag             # used later to tag strike out line
-            coords = tag.split('.')
-            col, text_id = int(coords[1]), int(coords[2])
-            break
+    coords_tag = getTagCoordinates(myPuzzle.itemcget(text_item_id, 'tags'), 'COL.')     # get the 'COL.x.y' tag
 
     # check if there was already a strike out line. this can happen, if the user slightly misses the strike out line
     # and clicks on the number again. The strike out line has the same coordinate tag as the number, but adds '.SOL'
-    # If found, delete the strike out line and exit
-    if len(myPuzzle.find_withtag(coord_tag + '.SOL')):
-        myPuzzle.delete(coord_tag + '.SOL')
+    # to the end. If found, delete the strike out line and return function
+    if myPuzzle.find_withtag(coords_tag[0] + '.SOL'):
+        myPuzzle.delete(coords_tag[0] + '.SOL')
         return
 
     # create line item to cross out number
-    x_offset = title_row_width + line_width_bold + calcSquarePosition(col + 1)
-    y_offset = title_col_width - (len(ng_cols[col]) - text_id) * number_height
+    x_offset = title_row_width + line_width_bold + calcSquarePosition(int(coords_tag[2]) + 1)
+    y_offset = title_col_width - (len(ng_cols[int(coords_tag[2])]) - int(coords_tag[3])) * number_height
     strike_out_line = myPuzzle.create_line(x_offset, y_offset, x_offset + square_size, y_offset + square_size,
                                            width=2, capstyle=tk.ROUND,
-                                           tags=('StrikeOutLine', coord_tag + '.SOL'))    # SOL = strike out line
+                                           tags=('StrikeOutLine', coords_tag[0] + '.SOL'))    # SOL = strike out line
 
     # bind event handler to right click event on strike out line
     myPuzzle.tag_bind(strike_out_line, '<Button-1>', handleStrikeOutLineClick)
@@ -185,28 +216,21 @@ def handRowNumberClick(event):
 
     # collect information about the clicked text item
     text_item_id = event.widget.find_withtag('current')[0]
-    tags = myPuzzle.itemcget(text_item_id, 'tags').split(' ')
-    row, text_id, coord_tag = 0, 0, ' '
-    for tag in tags:
-        if tag[0:4] == 'ROW.':
-            coord_tag = tag  # used later to tag strike out line
-            coords = tag.split('.')
-            row, text_id = int(coords[1]), int(coords[2])
-            break
+    coords_tag = getTagCoordinates(myPuzzle.itemcget(text_item_id, 'tags'), 'ROW.')     # get the 'ROW.' tag
 
     # check if there was already a strike out line. this can happen, if the user slightly misses the strike out line
     # and clicks on the number again. The strike out line has the same coordinate tag as the number, but adds '.SOL'
-    # If found, delete the strike out line and exit
-    if len(myPuzzle.find_withtag(coord_tag + '.SOL')):
-        myPuzzle.delete(coord_tag + '.SOL')
+    # to the end. If found, delete the strike out line and exit
+    if myPuzzle.find_withtag(coords_tag[0] + '.SOL'):
+        myPuzzle.delete(coords_tag[0] + '.SOL')
         return
 
     # create line item to cross out number
-    x_offset = title_row_width - (len(ng_rows[row]) - text_id) * (number_width + spacer_width)
-    y_offset = title_col_width + line_width_bold + calcSquarePosition(row + 1)
+    x_offset = title_row_width - (len(ng_rows[int(coords_tag[2])]) - int(coords_tag[3])) * (number_width + spacer_width)
+    y_offset = title_col_width + line_width_bold + calcSquarePosition(int(coords_tag[2]) + 1)
     strike_out_line = myPuzzle.create_line(x_offset, y_offset, x_offset + square_size, y_offset + square_size,
                                            width=2, capstyle=tk.ROUND,
-                                           tags=('StrikeOutLine', coord_tag + '.SOL'))  # SOL = strike out line
+                                           tags=('StrikeOutLine', coords_tag[0] + '.SOL'))  # SOL = strike out line
 
     # bind event handler to right click event on strike out line
     myPuzzle.tag_bind(strike_out_line, '<Button-1>', handleStrikeOutLineClick)
@@ -218,11 +242,95 @@ def handleStrikeOutLineClick(event):
     myPuzzle.delete(event.widget.find_withtag('current')[0])
 
 
+def handleRecButtonDown(event):
+    """ Handle 'button down' events on rectangle items on the grid.
+        Check for already active selections, since the user could click and hold more then one button at once.
+        If not, start a new selection by remembering which square was clicked by which button for
+        later processing. A new rectangle item is created for highlighting the selection """
+
+    # buttons 1 (left = fill), 2 (middle = clear) or 3 (right = dot), else abort
+    if event.num not in (1, 2, 3):
+        return
+
+    global sel_origin, sel_button
+
+    # no active user selection going on, register a new one
+    if not sel_button:
+        item_id = event.widget.find_withtag('current')[0]        # get item id of clicked square
+        sel_button = event.num                                   # save what button was used & active selection going on
+
+        # get and save column and row number
+        coords_tag = getTagCoordinates(myPuzzle.itemcget(item_id, 'tags'), 'GRID.')
+        sel_origin = (coords_tag[2], coords_tag[3])
+
+        # # use different colors for mouse button 1 (fill) and 3 (dot)
+        # if event.num == 1: highlight_color = sel_color_fill
+        # elif event.num == 2: highlight_color = sel_color_clear
+        # elif event.num == 3: highlight_color = sel_color_dot
+
+        # create rectangle item for highlighting the users selection
+        # myPuzzle.create_rectangle(sel_coordinates[0], sel_coordinates[1],
+        #                           sel_coordinates[2], sel_coordinates[3],
+        #                           width=sel_bd_width, outline=highlight_color, dash=sel_dash)
+
+        # TODO graphical representation of the user selection
+
+
+def gridOperation(col0, row0, col1, row1, action):
+    """ Handles user inputs in the playing field.
+        Fills, clears or dots all fields in the selection and saves the information into the virtual playing field
+        Fill: action = 1
+        Clear: action = 2
+        Dot: action = 3 """
+    global grid
+
+    # switch col- and row-parameters if it was a 'upwards' selection, so we can use range()
+    if col0 > col1:
+        col0, col1 = col1, col0
+    if row0 > row1:
+        row0, row1 = row1, row0
+
+    for x in range(col0, col1 + 1):             # + 1 to make the selection include all squares
+        for y in range(row0, row1 + 1):
+
+            # fill or empty actions can be processed the same way
+            if action == 1 or action == 2:
+                global rec_fill_color, rec_empty_color
+
+                color = rec_fill_color if action == 1 else rec_empty_color          # choose color
+                # TODO check if field had a dot before -> delete item
+                myPuzzle.itemconfigure('GRID.{0}.{1}'.format(x, y), fill=color)     # fill grid square
+                grid[x - 1][y - 1] = 'F' if action == 1 else 'E'
+
+            # dotting action, fill grid square like it was empty and create a dot on top of it
+            else:
+                pass
+
+
+def handleRecButtonUp(event):
+    """ Handle 'button up' events on rectangle items on the grid. """
+    global sel_origin, sel_button
+
+    # only handle message, if a selection has been started before and the correct button has been released
+    if event.num != sel_button:
+        return
+
+    # get column and row number for the square, over which the button was released
+    item_id = event.widget.find_closest(event.x, event.y)[0]
+    coords_tag = getTagCoordinates(myPuzzle.itemcget(item_id, 'tags'), 'GRID.')
+
+    # perform selected changes: color grid square, create dot, update virtual playing field
+    gridOperation(int(sel_origin[0]), int(sel_origin[1]), int(coords_tag[2]), int(coords_tag[3]), event.num)
+
+    # reset selection
+    sel_origin, sel_button = False, 0
+
+
 drawGrid()
 
-# TODO cross out numbers
-# TODO mouse click handling on squares
+
 # TODO dragging the mouse to mark blocks
 # TODO print puzzle as postscript
+# TODO reset functionality
 
 root.mainloop()
